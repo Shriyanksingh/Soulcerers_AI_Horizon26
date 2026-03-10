@@ -12,9 +12,6 @@ logs/
 *.err
 *.out
 
-# Heavy local ML artifacts (keep local, do not push)
-models/
-
 # Local IDE/system noise
 .DS_Store
 Thumbs.db
