@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Frontend deps/build cache
+frontend/node_modules/
+frontend/.vite/
+
+# Runtime logs and temporary outputs
+logs/
+*.log
+*.err
+*.out
+
+# Heavy local ML artifacts (keep local, do not push)
+models/
+
+# Local IDE/system noise
+.DS_Store
+Thumbs.db

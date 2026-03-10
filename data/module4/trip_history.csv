@@ -1,0 +1,5 @@
+"user_id","source","destination","day_of_week","departure_hour","weather_main","traffic_level","recommended_departure_time","timestamp"
+"u001","Home","Office","Monday","8","Clouds","High","07:45","2026-03-10T12:53:29"
+u1,Home,Office,Monday,8,Rain,High,07:30,2026-03-10T13:01:17
+u1,Home,Office,Tuesday,8,Clear,Medium,08:00,2026-03-10T13:01:37
+u1,Home,Gym,Wednesday,19,Clouds,Low,19:00,2026-03-10T13:01:53
