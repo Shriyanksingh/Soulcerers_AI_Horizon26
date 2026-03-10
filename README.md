@@ -1,62 +1,89 @@
 # Smart Navigation AI (Delhi)
 
-Map-first smart navigation app that combines:
-- future traffic prediction,
-- best time to leave,
-- parking availability prediction,
-- personalized travel tips from user behavior.
+Map-first smart navigation project with FastAPI + React + Leaflet.
 
-It includes a FastAPI backend (ML orchestration) and a React + Leaflet frontend (route and map UX).
+It combines:
+- traffic prediction,
+- best departure recommendation,
+- parking intelligence,
+- user personalization,
+- explainable route decisioning,
+- timeline visualization,
+- real-time simulation for demo scenarios.
 
 ---
 
-## 1. What This Project Does
+## 1) What It Does
 
 You select:
 - start location,
 - destination,
-- arrival target time.
+- target arrival time.
 
-The system returns:
-- predicted future traffic for the route,
-- recommended departure time (arrival-aware),
-- 15-minute traffic slots until arrival,
-- parking availability at destination,
-- personalized tip based on user history.
-
----
-
-## 2. Key Features
-
-- Map-first route planning (OSM + OSRM + Nominatim)
-- Main + alternate route support
-- AI route analysis endpoint: `/smart-route-analysis`
-- Analog clock style arrival-time picker in UI
-- Modular ML setup:
-  - Module 1: traffic prediction
-  - Module 2: best departure recommendation
-  - Module 3: parking prediction
-  - Module 4: user behavior personalization
+System returns:
+- predicted future traffic,
+- recommended departure time,
+- route decision ranking (best + backup),
+- parking availability and nearby parking options,
+- arrival probability,
+- confidence scores,
+- explanation of recommendation,
+- 15-minute traffic timeline until arrival.
 
 ---
 
-## 3. High-Level Architecture
+## 2) Feature Set (Current)
+
+### Feature 1: Decision Intelligence
+- Weighted route scoring:
+  - Traffic score (0.4)
+  - Time score (0.3)
+  - Parking score (0.2)
+  - Personalization score (0.1)
+- Selects best route and backup route.
+
+### Feature 2: Explanation Engine
+- Rule-based human-readable reasoning.
+- Adds `why_this_route[]` and `risk_warning`.
+
+### Feature 3: Arrival Probability
+- Estimates chance of reaching on time.
+- Returns numeric probability + label.
+
+### Feature 4: Confidence Scores
+- Traffic confidence + parking confidence heuristics.
+
+### Feature 5: Real-Time Simulation Engine
+- Endpoint: `POST /simulate-event`
+- Simulates traffic spike/block/accident and reroute recommendation.
+
+### Feature 6: Parking Intelligence Upgrade
+- Generates nearby parking options (demo-safe deterministic mock logic).
+- Highlights best parking option.
+
+### Feature 7: Timeline Traffic Visualization
+- Converts slot predictions into frontend timeline objects.
+- Includes departure and arrival markers.
+
+---
+
+## 3) Architecture
 
 ```text
-Frontend (React + Leaflet)
+Frontend (React + Leaflet, no build pipeline)
     |
     | HTTP JSON
     v
 FastAPI Backend (backend/app.py)
     |
-    | model inference + orchestration
+    | orchestration across modules
     v
-models/module* + data/module4/trip_history.csv
+ML models + decision/explain/probability/confidence/simulation/timeline engines
 ```
 
 ---
 
-## 4. Tech Stack
+## 4) Tech Stack
 
 | Layer | Stack |
 |---|---|
@@ -68,12 +95,19 @@ models/module* + data/module4/trip_history.csv
 
 ---
 
-## 5. Project Structure
+## 5) Project Structure
 
 ```text
 backend/
-  app.py                             # FastAPI backend + all APIs
-  slot_utils.py                      # slot helper functions
+  app.py
+  slot_utils.py
+  decision_engine.py
+  explain_engine.py
+  probability_utils.py
+  confidence_utils.py
+  parking_intelligence.py
+  timeline_utils.py
+  simulation_engine.py
 
 frontend/
   index.html
@@ -81,26 +115,20 @@ frontend/
   src/
     App.jsx
     App.css
-    services/api.js
+    services/
+      api.js
+    components/
+      TrafficTimeline.jsx
 
 modules/
   generate_delhi_module_datasets.py
   module1_traffic_prediction/
-    prepare_dataset.py
-    train_random_forest.py
-    train_delhi_traffic_model.py
   module2_best_time_to_leave/
-    train_departure_model.py
   module3_parking_availability/
-    train_parking_model.py
   module4_user_behavior_learning/
-    train_user_behavior_model.py
 
 data/
   module1/
-    delhi/
-    processed/
-    legacy_archive/
   module2/
   module3/
   module4/
@@ -111,8 +139,6 @@ models/
   module3/
   module4/
 
-logs/                               # runtime logs/errors/output files
-
 run_latest_backend_8010.bat
 run_frontend_5173.bat
 run_smart_nav_stack.bat
@@ -120,28 +146,22 @@ run_smart_nav_stack.bat
 
 ---
 
-## 6. Quick Start (Windows)
+## 6) Run (Windows)
 
-### Option A: One-click (recommended)
-
-From project root:
-
+### One-click
 ```powershell
 Set-Location -LiteralPath "C:\Users\LENOVO\OneDrive\Desktop\aimodeltraffic"
 cmd /c ".\run_smart_nav_stack.bat"
 ```
 
-### Option B: Manual start
-
-Terminal 1 (backend):
-
+### Manual
+Backend terminal:
 ```powershell
 Set-Location -LiteralPath "C:\Users\LENOVO\OneDrive\Desktop\aimodeltraffic"
 cmd /c ".\run_latest_backend_8010.bat"
 ```
 
-Terminal 2 (frontend):
-
+Frontend terminal:
 ```powershell
 Set-Location -LiteralPath "C:\Users\LENOVO\OneDrive\Desktop\aimodeltraffic"
 cmd /c ".\run_frontend_5173.bat"
@@ -153,44 +173,58 @@ Open:
 
 ---
 
-## 7. Important Runtime Note
+## 7) API Overview
 
-Frontend API client now targets only:
-- `http://127.0.0.1:8010`
-
-There is no fallback to `8000` anymore.  
-If backend `8010` is not running, frontend will show a clear connectivity error.
-
----
-
-## 8. API Overview
-
-### Core Endpoints
+### Core
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/health` | health check |
 | POST | `/predict` | traffic prediction |
-| POST | `/best-time-to-leave` | best departure time |
+| POST | `/best-time-to-leave` | departure recommendation |
 | POST | `/parking-predict` | parking availability |
-| POST | `/personalized-tip` | personalized suggestion |
-| POST | `/smart-route-analysis` | combined map-first intelligence |
+| POST | `/personalized-tip` | personalization text |
+| POST | `/smart-route-analysis` | full orchestration output |
+| POST | `/simulate-event` | real-time event simulation |
 
-### Supporting Endpoints
+### Supporting
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/predict-slots` | slot-wise traffic prediction |
-| POST | `/recommend-departure` | best slot selection |
+| POST | `/predict-slots` | slot-wise traffic |
+| POST | `/recommend-departure` | best slot |
 | POST | `/log-trip` | save trip history |
-| POST | `/user-patterns` | summarize user behavior |
+| POST | `/user-patterns` | user behavior summary |
 
 ---
 
-## 9. Main Endpoint Example
+## 8) `POST /smart-route-analysis` (Current Response)
 
-### `POST /smart-route-analysis` request (example)
+Existing + upgraded fields include:
+- `selected_route_summary`
+- `alternate_route_summaries`
+- `route_decision`
+- `predicted_future_traffic`
+- `recommended_departure_time`
+- `target_arrival_time`
+- `estimated_travel_minutes`
+- `departure_buffer_minutes`
+- `next_time_slot_recommendations`
+- `parking_availability`
+- `parking_probability`
+- `parking_options`
+- `best_parking_option`
+- `arrival_probability`
+- `arrival_probability_label`
+- `traffic_confidence`
+- `parking_confidence`
+- `traffic_timeline`
+- `recommended_departure_marker`
+- `arrival_marker`
+- `explanation`
+- `personalized_tip`
 
+Example request:
 ```json
 {
   "user_id": "u1",
@@ -209,106 +243,90 @@ If backend `8010` is not running, frontend will show a clear connectivity error.
 }
 ```
 
-### Response includes
-
-- `predicted_future_traffic`
-- `recommended_departure_time`
-- `target_arrival_time`
-- `estimated_travel_minutes`
-- `departure_buffer_minutes`
-- `next_time_slot_recommendations`
-- `parking_availability`
-- `personalized_tip`
-- `selected_route_summary`
-- `alternate_route_summaries`
-
 ---
 
-## 10. ML Models and Data
+## 9) `POST /simulate-event` Example
 
-| Module | Goal | Model File | Training Script |
-|---|---|---|---|
-| Module 1 | Traffic prediction | `models/module1/traffic_model_delhi.pkl`, `models/module1/traffic_model.pkl` | `modules/module1_traffic_prediction/train_delhi_traffic_model.py`, `modules/module1_traffic_prediction/train_random_forest.py` |
-| Module 2 | Best departure hour | `models/module2/departure_model.pkl` | `modules/module2_best_time_to_leave/train_departure_model.py` |
-| Module 3 | Parking availability | `models/module3/parking_model.pkl` | `modules/module3_parking_availability/train_parking_model.py` |
-| Module 4 | User behavior | `models/module4/user_behavior_model.pkl` | `modules/module4_user_behavior_learning/train_user_behavior_model.py` |
-
-### Dataset generation
-
-```powershell
-python modules/generate_delhi_module_datasets.py
+Request:
+```json
+{
+  "event_type": "traffic_spike",
+  "affected_route": "selected_route",
+  "delay_minutes": 12
+}
 ```
 
-This creates:
-- `data/module2/departure_dataset.csv`
-- `data/module3/parking_dataset.csv`
-- `data/module4/user_behavior_dataset.csv`
+Response shape:
+```json
+{
+  "event_type": "traffic_spike",
+  "affected_route": "selected_route",
+  "added_delay_minutes": 12,
+  "updated_routes": [],
+  "reroute_recommendation": "alternate_1",
+  "simulation_summary": "Traffic spike detected. Alternate route is now safer.",
+  "best_route_name": "Alternate Route 1"
+}
+```
 
 ---
 
-## 11. Frontend UX Notes
+## 10) Frontend UX (Current)
 
-- Arrival time selection uses an analog clock picker (hour/minute dial + AM/PM).
-- Manual fallback `time` input is also available for exact entry.
-- Route cards show current (speed-derived) traffic and AI future traffic separately.
+- Analog arrival-time picker.
+- Route options with main/alternates.
+- Full-screen AI Analysis Dashboard tabs:
+  - Overview
+  - Feature 1: Decision
+  - Feature 2: Explanation
+  - Feature 3: Arrival
+  - Feature 4: Confidence
+  - Feature 5: Simulation
+  - Feature 6: Parking
+  - Feature 7: Timeline
+  - Slots
+- Side action: `Simulate Traffic Spike`.
 
 ---
 
-## 12. Troubleshooting
+## 11) Troubleshooting
 
-### A) `run_*.bat is not recognized`
-
-Use:
-
+### `run_*.bat` not recognized (PowerShell)
 ```powershell
 cmd /c ".\run_latest_backend_8010.bat"
 cmd /c ".\run_frontend_5173.bat"
 ```
 
-And ensure you are inside project root:
-
-```powershell
-Set-Location -LiteralPath "C:\Users\LENOVO\OneDrive\Desktop\aimodeltraffic"
-```
-
-### B) Frontend shows `Failed to fetch` / backend unreachable
-
+### Backend not reachable
 1. Start backend on `8010`.
-2. Check `http://127.0.0.1:8010/health`.
-3. Refresh frontend.
+2. Verify:
+```powershell
+Invoke-WebRequest -Uri "http://127.0.0.1:8010/health" -UseBasicParsing
+```
+3. Hard refresh frontend (`Ctrl + F5`).
 
-### C) Port already in use
-
-Find process:
-
+### Port already in use
 ```powershell
 netstat -ano | findstr :8010
 netstat -ano | findstr :5173
-```
-
-Kill process:
-
-```powershell
 Stop-Process -Id <PID> -Force
 ```
 
 ---
 
-## 13. Suggested Demo Flow
+## 12) Demo Flow (Hackathon)
 
-1. Open frontend map.
-2. Pick start and destination (search or map click).
-3. Set arrival time from analog clock.
+1. Open app.
+2. Set start + destination.
+3. Set arrival time.
 4. Click `Show Routes + AI Analysis`.
-5. Explain outputs:
-   - future traffic,
-   - recommended departure,
-   - slot timeline,
-   - parking prediction,
-   - personalized tip.
+5. Open AI dashboard and show Feature 1–7 tabs.
+6. Run `Simulate Traffic Spike` and explain reroute.
 
 ---
 
-## 14. Status
+## 13) Note
 
-Current project state is optimized for local Windows demo and hackathon-style iteration, with clear backend orchestration and modular ML training scripts.
+Frontend API validator expects latest backend response schema (including parking intelligence + timeline fields).  
+If frontend shows “outdated backend”, restart backend and refresh frontend.
+

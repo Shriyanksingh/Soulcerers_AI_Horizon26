@@ -15,6 +15,35 @@ try:
 except ImportError:
     # Fallback for direct execution contexts.
     from slot_utils import choose_best_departure_slot, generate_departure_slots
+try:
+    from .probability_utils import calculate_arrival_probability
+except ImportError:
+    from probability_utils import calculate_arrival_probability
+try:
+    from .confidence_utils import calculate_parking_confidence, calculate_traffic_confidence
+except ImportError:
+    from confidence_utils import calculate_parking_confidence, calculate_traffic_confidence
+try:
+    from .explain_engine import generate_route_explanation
+except ImportError:
+    from explain_engine import generate_route_explanation
+try:
+    from .decision_engine import calculate_weighted_route_scores, select_best_and_backup
+except ImportError:
+    # Fallback for direct execution contexts.
+    from decision_engine import calculate_weighted_route_scores, select_best_and_backup
+try:
+    from .parking_intelligence import generate_parking_options
+except ImportError:
+    from parking_intelligence import generate_parking_options
+try:
+    from .timeline_utils import build_traffic_timeline
+except ImportError:
+    from timeline_utils import build_traffic_timeline
+try:
+    from .simulation_engine import simulate_traffic_event
+except ImportError:
+    from simulation_engine import simulate_traffic_event
 
 
 # Create the FastAPI application
@@ -353,6 +382,111 @@ class RouteSummary(BaseModel):
     traffic_level: str
 
 
+class DecisionRoute(BaseModel):
+    """Decision-intelligence score row for one route option."""
+
+    route_name: str
+    route_type: str
+    distance_km: float
+    travel_time_min: int
+    predicted_traffic: str
+    parking_probability: float
+    personalization_score: float
+    traffic_score: float
+    time_score: float
+    parking_score: float
+    decision_score: float
+
+
+class RouteDecision(BaseModel):
+    """Decision-intelligence payload returned by smart-route-analysis."""
+
+    best_route: Optional[DecisionRoute]
+    backup_route: Optional[DecisionRoute]
+    all_routes_ranked: list[DecisionRoute]
+
+
+class RouteExplanation(BaseModel):
+    """Human-readable explanation block for route recommendation."""
+
+    why_this_route: list[str]
+    risk_warning: str
+
+
+class ParkingOption(BaseModel):
+    """One nearby parking option for destination decision support."""
+
+    name: str
+    predicted_occupancy: float
+    availability_probability: float
+    walking_time_min: int
+    parking_score: float
+    recommendation_label: str
+
+
+class BestParkingOption(BaseModel):
+    """Top-ranked parking option from parking intelligence."""
+
+    name: str
+    parking_score: float
+    recommendation_label: str
+
+
+class TrafficTimelinePoint(BaseModel):
+    """Frontend-friendly timeline point for traffic visualization."""
+
+    time: str
+    traffic_level: str
+    color_hint: str
+
+
+class SimulationRouteUpdate(BaseModel):
+    """Route update row returned by simulation endpoint."""
+
+    route_name: str
+    route_key: str
+    distance_km: float
+    original_duration_min: int
+    updated_duration_min: int
+    added_delay_minutes: int
+    original_traffic: str
+    updated_traffic: str
+    simulated_cost: float
+    is_now_best: bool
+
+
+class SimulateEventRequest(BaseModel):
+    """Request schema for real-time event simulation endpoint."""
+
+    event_type: str = Field(
+        default="traffic_spike",
+        description="traffic_spike, road_block, accident, congestion_near_destination",
+    )
+    affected_route: str = Field(
+        default="selected_route",
+        description="selected_route or alternate_1/alternate_2...",
+    )
+    delay_minutes: int = Field(default=10, ge=1, le=120)
+    selected_route_summary: Optional[RouteSummary] = None
+    alternate_route_summaries: Optional[list[RouteSummary]] = None
+    current_predicted_traffic: Optional[str] = Field(
+        default="Medium",
+        description="Current traffic context: Low, Medium, High",
+    )
+
+
+class SimulateEventResponse(BaseModel):
+    """Response schema for real-time traffic simulation."""
+
+    event_type: str
+    affected_route: str
+    added_delay_minutes: int
+    updated_routes: list[SimulationRouteUpdate]
+    reroute_recommendation: str
+    simulation_summary: str
+    best_route_name: str
+
+
 class SmartRouteAnalysisRequest(BaseModel):
     """Request schema for map-based orchestration endpoint."""
 
@@ -408,6 +542,7 @@ class SmartRouteAnalysisResponse(BaseModel):
 
     selected_route_summary: RouteSummary
     alternate_route_summaries: list[RouteSummary]
+    route_decision: RouteDecision
     predicted_future_traffic: str
     recommended_departure_time: str
     recommended_traffic_level: str
@@ -417,7 +552,18 @@ class SmartRouteAnalysisResponse(BaseModel):
     is_running_late: bool
     next_time_slot_recommendations: list[CheckedSlot]
     parking_availability: str
+    parking_probability: float
     parking_suggestion: str
+    parking_options: list[ParkingOption]
+    best_parking_option: BestParkingOption
+    arrival_probability: float
+    arrival_probability_label: str
+    traffic_confidence: float
+    parking_confidence: float
+    traffic_timeline: list[TrafficTimelinePoint]
+    recommended_departure_marker: str
+    arrival_marker: str
+    explanation: RouteExplanation
     personalized_tip: str
     destination_type: str
     weather_main: str
@@ -1255,7 +1401,6 @@ def build_route_summaries(
         alt_count = min(
             len(alternate_route_distances_km),
             len(alternate_route_durations_min),
-            3,
         )
         for idx in range(alt_count):
             alt_distance = round(max(0.1, float(alternate_route_distances_km[idx])), 2)
@@ -1294,6 +1439,104 @@ def build_route_summaries(
             )
 
     return selected_summary, alternate_summaries
+
+
+def parking_availability_to_probability(availability: str) -> float:
+    """
+    Convert parking label to probability score for route decisioning.
+
+    Higher value means parking is easier, so it should raise final decision score.
+    """
+    normalized = parse_traffic_level(availability)
+    return {"Low": 0.3, "Medium": 0.6, "High": 0.85}[normalized]
+
+
+def resolve_route_traffic_for_decision(
+    *,
+    route_summary: RouteSummary,
+    selected_route_duration_min: int,
+    selected_route_traffic: str,
+) -> str:
+    """
+    Return route-specific traffic for decision scoring.
+
+    Today:
+    - Use route_summary.traffic_level when available.
+    Fallback:
+    - Approximate by duration delta against selected route.
+
+    Future improvement hook:
+    - Replace fallback with real per-route model inference for each alternative.
+    """
+    declared_traffic = str(route_summary.traffic_level).strip()
+    if declared_traffic:
+        return parse_traffic_level(declared_traffic)
+
+    return estimate_route_traffic_from_delay(
+        selected_route_duration_min,
+        int(route_summary.estimated_duration_min),
+        parse_traffic_level(selected_route_traffic),
+    )
+
+
+def calibrate_slot_traffic_level(
+    *,
+    predicted_level: str,
+    slot_dt: datetime,
+    weather_main: str,
+    rain_1h: float,
+    holiday: str,
+) -> str:
+    """
+    Apply context calibration to slot-level traffic output.
+
+    Why this exists:
+    - Raw model output can be too smooth across many slots.
+    - City traffic normally rises in peak commute windows.
+    - This keeps model signal while preventing unrealistic all-day "Low" timelines.
+
+    Future improvement hook:
+    - Replace these floors with per-slot live signals (speed/delay/API telemetry).
+    """
+    normalized_predicted = parse_traffic_level(predicted_level)
+    slot_hour = slot_dt.hour
+    weekend = slot_dt.weekday() >= 5
+    holiday_flag = is_holiday_flag(holiday)
+    weather_clean = normalize_weather_main(weather_main).strip().lower()
+
+    # Higher rank means heavier traffic.
+    rank = TRAFFIC_PRIORITY[normalized_predicted]
+    minimum_rank = 0
+
+    morning_peak = 7 <= slot_hour <= 10
+    evening_peak = 17 <= slot_hour <= 21
+    shoulder_window = 11 <= slot_hour <= 13 or 16 <= slot_hour <= 17
+
+    # Peak commute should rarely stay all-day low on working days.
+    if not holiday_flag:
+        if morning_peak or evening_peak:
+            minimum_rank = max(minimum_rank, 1)
+        elif not weekend and shoulder_window:
+            minimum_rank = max(minimum_rank, 1)
+
+    # Weather/rain can push traffic above baseline.
+    if rain_1h >= 2.5:
+        minimum_rank = max(minimum_rank, 2 if (morning_peak or evening_peak) else 1)
+    elif rain_1h >= 0.8:
+        minimum_rank = max(minimum_rank, 1)
+
+    if weather_clean in {"thunderstorm"}:
+        minimum_rank = max(minimum_rank, 2 if (morning_peak or evening_peak) else 1)
+    elif weather_clean in {"rain", "drizzle"}:
+        minimum_rank = max(minimum_rank, 1)
+    elif weather_clean in {"fog", "mist", "haze", "smoke"} and (
+        6 <= slot_hour <= 11 or 17 <= slot_hour <= 22
+    ):
+        minimum_rank = max(minimum_rank, 1)
+
+    adjusted_rank = max(rank, minimum_rank)
+    adjusted_rank = max(0, min(2, adjusted_rank))
+    return {0: "Low", 1: "Medium", 2: "High"}[adjusted_rank]
 
 
 def predict_next_time_slot_recommendations(
@@ -1371,13 +1614,22 @@ def predict_next_time_slot_recommendations(
         ]
         predictions = predict_traffic_levels(feature_rows)
 
-    return [
-        CheckedSlot(
-            time=slot_dt.strftime("%H:%M"),
-            traffic=parse_traffic_level(predicted_level),
+    calibrated_slots: list[CheckedSlot] = []
+    for slot_dt, predicted_level in zip(slot_datetimes, predictions):
+        calibrated_level = calibrate_slot_traffic_level(
+            predicted_level=str(predicted_level),
+            slot_dt=slot_dt,
+            weather_main=weather_main,
+            rain_1h=rain_1h,
+            holiday=holiday,
         )
-        for slot_dt, predicted_level in zip(slot_datetimes, predictions)
-    ]
+        calibrated_slots.append(
+            CheckedSlot(
+                time=slot_dt.strftime("%H:%M"),
+                traffic=calibrated_level,
+            )
+        )
+    return calibrated_slots
 
 
 def build_personalized_tip_text(
@@ -2068,6 +2320,71 @@ def personalized_tip(request: PersonalizedTipRequest) -> PersonalizedTipResponse
     return PersonalizedTipResponse(personalized_tip=tip_text)
 
 
+@app.post("/simulate-event", response_model=SimulateEventResponse)
+def simulate_event(request: SimulateEventRequest) -> SimulateEventResponse:
+    """
+    Feature 5 endpoint: simulate sudden traffic events and reroute suggestions.
+    """
+
+    def to_dict(model_obj: BaseModel) -> dict:
+        if hasattr(model_obj, "model_dump"):
+            return model_obj.model_dump()  # pydantic v2
+        return model_obj.dict()  # pydantic v1
+
+    try:
+        current_traffic = parse_traffic_level(request.current_predicted_traffic or "Medium")
+
+        if request.selected_route_summary is None:
+            selected_summary = RouteSummary(
+                route_name="Main Route",
+                distance_km=6.0,
+                estimated_duration_min=18,
+                traffic_level=current_traffic,
+            )
+        else:
+            selected_summary = request.selected_route_summary
+
+        if request.alternate_route_summaries:
+            alternate_summaries = request.alternate_route_summaries
+        else:
+            alt_1_duration = max(5, selected_summary.estimated_duration_min + 4)
+            alt_2_duration = max(5, selected_summary.estimated_duration_min + 8)
+            alternate_summaries = [
+                RouteSummary(
+                    route_name="Alternate Route 1",
+                    distance_km=round(selected_summary.distance_km * 1.1, 2),
+                    estimated_duration_min=alt_1_duration,
+                    traffic_level=estimate_route_traffic_from_delay(
+                        selected_summary.estimated_duration_min,
+                        alt_1_duration,
+                        selected_summary.traffic_level,
+                    ),
+                ),
+                RouteSummary(
+                    route_name="Alternate Route 2",
+                    distance_km=round(selected_summary.distance_km * 1.2, 2),
+                    estimated_duration_min=alt_2_duration,
+                    traffic_level=estimate_route_traffic_from_delay(
+                        selected_summary.estimated_duration_min,
+                        alt_2_duration,
+                        selected_summary.traffic_level,
+                    ),
+                ),
+            ]
+
+        simulation_payload = simulate_traffic_event(
+            selected_route_summary=to_dict(selected_summary),
+            alternate_route_summaries=[to_dict(item) for item in alternate_summaries],
+            current_predicted_traffic=current_traffic,
+            simulated_delay_minutes=request.delay_minutes,
+            event_type=request.event_type,
+            affected_route=request.affected_route,
+        )
+        return SimulateEventResponse(**simulation_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/smart-route-analysis", response_model=SmartRouteAnalysisResponse)
 def smart_route_analysis(request: SmartRouteAnalysisRequest) -> SmartRouteAnalysisResponse:
     """
@@ -2186,6 +2503,12 @@ def smart_route_analysis(request: SmartRouteAnalysisRequest) -> SmartRouteAnalys
             target_end_dt=target_arrival_dt,
             max_slots=96,
         )
+        timeline_payload = build_traffic_timeline(
+            next_time_slot_recommendations=next_slots,
+            recommended_departure_time=recommended_departure_time,
+            target_arrival_time=target_arrival_dt.strftime("%H:%M"),
+        )
+        traffic_timeline = [TrafficTimelinePoint(**item) for item in timeline_payload["traffic_timeline"]]
 
         parking_availability = predict_parking_availability_ml(
             area_type=destination_type,
@@ -2193,6 +2516,42 @@ def smart_route_analysis(request: SmartRouteAnalysisRequest) -> SmartRouteAnalys
             day_of_week=day_name,
             holiday=holiday_flag,
             traffic_level=predicted_future_traffic,
+        )
+        parking_probability = parking_availability_to_probability(parking_availability)
+        parking_intelligence = generate_parking_options(
+            destination_lat=request.end_lat,
+            destination_lng=request.end_lng,
+            parking_availability=parking_availability,
+            destination_context=destination_type,
+        )
+        parking_options = [ParkingOption(**item) for item in parking_intelligence["parking_options"]]
+        best_parking_option = BestParkingOption(**parking_intelligence["best_parking_option"])
+
+        arrival_probability, arrival_probability_label = calculate_arrival_probability(
+            predicted_travel_time_min=selected_duration_min,
+            departure_buffer_min=departure_buffer_minutes,
+            predicted_traffic_level=predicted_future_traffic,
+        )
+
+        traffic_confidence = calculate_traffic_confidence(
+            predicted_traffic_level=predicted_future_traffic,
+            weather_main=weather_main,
+            rain_1h=rain_1h,
+        )
+        parking_confidence = calculate_parking_confidence(
+            parking_availability=parking_availability,
+            destination_type=destination_type,
+            traffic_level=predicted_future_traffic,
+        )
+
+        explanation = RouteExplanation(
+            **generate_route_explanation(
+                predicted_traffic_level=predicted_future_traffic,
+                travel_time_min=selected_duration_min,
+                parking_availability=parking_availability,
+                departure_buffer_min=departure_buffer_minutes,
+                arrival_probability=arrival_probability,
+            )
         )
 
         destination_label = (request.destination_address or "Destination").strip()
@@ -2214,12 +2573,47 @@ def smart_route_analysis(request: SmartRouteAnalysisRequest) -> SmartRouteAnalys
             alternate_route_durations_min=request.alternate_route_durations_min,
         )
 
+        # Decision Intelligence Layer:
+        # Combine traffic, travel time, parking ease, and personalization into one score.
+        # Personalization is currently a placeholder and can be replaced with a real route-specific model signal.
+        route_candidates: list[dict] = []
+        personalization_placeholder = 0.7
+        all_route_summaries = [selected_route_summary, *alternate_route_summaries]
+
+        for index, route_summary in enumerate(all_route_summaries):
+            route_candidates.append(
+                {
+                    "route_name": route_summary.route_name,
+                    "route_type": "selected" if index == 0 else "alternate",
+                    "distance_km": route_summary.distance_km,
+                    "travel_time_min": int(route_summary.estimated_duration_min),
+                    "predicted_traffic": resolve_route_traffic_for_decision(
+                        route_summary=route_summary,
+                        selected_route_duration_min=selected_route_summary.estimated_duration_min,
+                        selected_route_traffic=predicted_future_traffic,
+                    ),
+                    # Current parking model returns destination-level availability,
+                    # so every route uses the same base probability for now.
+                    "parking_probability": parking_probability,
+                    "personalization_score": personalization_placeholder,
+                }
+            )
+
+        scored_routes = calculate_weighted_route_scores(route_candidates)
+        best_route, backup_route, all_routes_ranked = select_best_and_backup(scored_routes)
+        route_decision = RouteDecision(
+            best_route=best_route,
+            backup_route=backup_route,
+            all_routes_ranked=all_routes_ranked,
+        )
+
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return SmartRouteAnalysisResponse(
         selected_route_summary=selected_route_summary,
         alternate_route_summaries=alternate_route_summaries,
+        route_decision=route_decision,
         predicted_future_traffic=predicted_future_traffic,
         recommended_departure_time=recommended_departure_time,
         recommended_traffic_level=model_best_departure.recommended_traffic_level,
@@ -2229,7 +2623,18 @@ def smart_route_analysis(request: SmartRouteAnalysisRequest) -> SmartRouteAnalys
         is_running_late=is_running_late,
         next_time_slot_recommendations=next_slots,
         parking_availability=parking_availability,
+        parking_probability=parking_probability,
         parking_suggestion=parking_suggestion(parking_availability),
+        parking_options=parking_options,
+        best_parking_option=best_parking_option,
+        arrival_probability=arrival_probability,
+        arrival_probability_label=arrival_probability_label,
+        traffic_confidence=traffic_confidence,
+        parking_confidence=parking_confidence,
+        traffic_timeline=traffic_timeline,
+        recommended_departure_marker=timeline_payload["recommended_departure_marker"],
+        arrival_marker=timeline_payload["arrival_marker"],
+        explanation=explanation,
         personalized_tip=tip_text,
         destination_type=destination_type,
         weather_main=weather_main,

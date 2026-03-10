@@ -66,7 +66,7 @@ async function postRequest(path, payload, options = {}) {
   throw lastError;
 }
 
-function isSmartRouteResponseV2(data) {
+function isSmartRouteResponseV4(data) {
   return (
     data &&
     typeof data === "object" &&
@@ -74,7 +74,21 @@ function isSmartRouteResponseV2(data) {
     Number.isFinite(Number(data.estimated_travel_minutes)) &&
     Number.isFinite(Number(data.departure_buffer_minutes)) &&
     typeof data.is_running_late === "boolean" &&
-    Array.isArray(data.next_time_slot_recommendations)
+    Array.isArray(data.next_time_slot_recommendations) &&
+    Number.isFinite(Number(data.arrival_probability)) &&
+    typeof data.arrival_probability_label === "string" &&
+    Number.isFinite(Number(data.traffic_confidence)) &&
+    Number.isFinite(Number(data.parking_confidence)) &&
+    data.explanation &&
+    Array.isArray(data.explanation.why_this_route) &&
+    typeof data.explanation.risk_warning === "string" &&
+    Array.isArray(data.parking_options) &&
+    data.best_parking_option &&
+    typeof data.best_parking_option.name === "string" &&
+    Number.isFinite(Number(data.best_parking_option.parking_score)) &&
+    Array.isArray(data.traffic_timeline) &&
+    typeof data.recommended_departure_marker === "string" &&
+    typeof data.arrival_marker === "string"
   );
 }
 
@@ -86,7 +100,8 @@ window.ApiService = {
   getPersonalizedTip: (payload) => postRequest("/personalized-tip", payload),
   smartRouteAnalysis: (payload) =>
     postRequest("/smart-route-analysis", payload, {
-      validator: isSmartRouteResponseV2,
-      requireLatest: false,
+      validator: isSmartRouteResponseV4,
+      requireLatest: true,
     }),
+  simulateEvent: (payload) => postRequest("/simulate-event", payload),
 };
